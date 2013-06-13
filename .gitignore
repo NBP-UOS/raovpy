@@ -1,4 +1,13 @@
+#Eclipse project files
+.project
+.pydevproject
+
+#Python compiled files
 *.py[co]
+
+#Vim backup and swap
+*~
+.*.sw?
 
 # Packages
 *.egg

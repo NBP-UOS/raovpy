@@ -24,8 +24,16 @@ that is definetly not enough.
 Documentation
 -------------
 
-Only existent in the source file. Contact me (Niklas) if you have questions.
+Mainly in the source file. Contact me (Niklas) if you have questions.
 
+The general idea of the package is this:
+1) Set up a factor description, here a dictionary where the names are the factors and the values are the levels of a factor.
+2) Take a bunch of datamats (one per subject) and filter them such that you'll get on datamat per cell of the anova. One cell is just a subset of the data where all factors are set to one of their levels. All combinations of factor levels make up the entire dataset.
+3) Call a function that computes the dependent variable from the cell datamats. This happens in `lm_anova` (in the lambda function). If you want to use `lm_anova` you'll have to add an extra argument where you pass a function handle that does this. They are usually cheap functions like: `lambda x: mean(x.dependent_variable)`.
+
+
+> For the anova: must the factor levels be numeric, or can they be strings? Like `{'category':['pleasant','neutral','unpleasant']}`, or must I recode these to integers?
+It might work with strings. Test the filter by dict function and see if it gives the correct output. It depends on numpy. If you can have an array with strings and the `==` returns a logical index array it should work.
 
 Copyright & License
 -------------------

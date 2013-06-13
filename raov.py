@@ -1,10 +1,12 @@
 import os
 import tempfile
 import copy
+import csv
 import numpy as np
 from rpy2 import robjects
 from rpy2.robjects.vectors import DataFrame
 from ocupy import measures as ms
+from ocupy.datamat import VectorFactory
 
 '''
 The raovpy module allows the computation of a repeated measures ANOVA with
@@ -277,6 +279,7 @@ def make_data_frame(matrix, fields, measure='perc_corr'):
             String Name for the dependent variable
     Output:
         Dictionary
+
     '''
     slice_list = [slice(d) for d in matrix.shape]
     indices = np.mgrid[slice_list]
@@ -286,3 +289,175 @@ def make_data_frame(matrix, fields, measure='perc_corr'):
         data_frame[name] = robjects.IntVector((1 + index).flatten().tolist())
 
     return data_frame
+
+def filter_by_dict(fm, d):
+    '''
+    Filter a datamat by combinations of fields, a.k.a cells from datamat.
+
+    d is dict that contains as keys field names and as
+    values a list that contains admissible field values.
+
+    The function creates the set of all possible
+    field value pairs in d and filters the fixmat once
+    for every combination.
+
+    Example:
+    d = {'session':[0,3], 'name':[1,3]}
+    t = filter_by_dict(fm,d)
+    t = {'session0name1':datamat, # only values where session==0 and name==1
+         'session0name3':datamat, # session==0 and name==3
+         'session3name1':datamat, # session==3 and name==1
+         'session3name3':datamat} # session==3 and name==3
+    '''
+    results = {}
+    factors = {}
+    factor_names = []
+
+    def drill_down(fm, d, name, factor_list):
+        if d == {}:
+            factors[name] = factor_list
+            results[name] = fm
+        else:
+            # Pick the first key in d
+            key = np.sort(d.keys())[0]
+            if not key in factor_names:
+                factor_names.append(key)
+            values = d[key]
+            for v in values:
+                m = copy.copy(d)
+                del m[key]
+                v2 = copy.copy(factor_list)
+                v2.append(v)
+                drill_down(fm[fm.field(key) == v], m, name + '%s%i' % (key, v),
+                        v2)
+
+    drill_down(fm, d, '', [])
+    return results, factors, factor_names
+
+
+def dv_from_cells(cell_dict, function):
+    '''
+    Computes the dependent variable for every cell.
+
+    Input:
+        cell_dict : dictionary
+            Contains as keys cell names, and as values datamats that contain
+            all data for the given cell.
+    Returns:
+        cell_dict : dictionary
+            Contains as keys cell names, and as values the dependent measu
+    '''
+    cell_dict = dict((key, function(value)) for (key, value) in \
+                    cell_dict.iteritems())
+    return cell_dict
+
+
+def cells2file(cell_fms, cell_names, factor_names, factors, datafile,
+            factorfile):
+    """
+    Exports dv values to files that can be read by R and SPSS.
+
+    Inpute:
+        cell_fms : List
+            Each entry is a dictionary with cell names as keys and
+            the dependent variable as value.
+        cell_names : list
+            Names of the cells, e.g. the keys of the subject dictionaries in
+            cell_fms.
+        factor_names : list
+            Names of the factors
+        factors : dictionary
+            Contains for each cell a list of factor levels that
+            encodes the level of each factor for this cell. The list
+            has to be ordered according to factor_names.
+        filename : File object
+            File to output data to. Must be writable.
+        factorfile : File object
+            File to output factor definitions to. Must be writable.
+    """
+    cell_names = np.sort(cell_names)
+    # Write header with variable names
+    for cell in cell_names[:-1]:
+        datafile.write('%s,' % cell)
+    datafile.write('%s\n' % cell_names[-1])
+
+    # Write subject data
+    for datum in cell_fms:
+        for cell in cell_names[:-1]:
+            datafile.write('%f,' % datum[cell])
+        datafile.write('%f\n' % datum[cell_names[-1]])
+    # Last thing: Create a factor file that encodes how the
+    # factors change over the cells
+    for f in factor_names[:-1]:
+        factorfile.write('%s,' % f)
+    factorfile.write('%s\n' % factor_names[-1])
+
+    for cell in cell_names:
+        for fv in factors[cell][:-1]:
+            factorfile.write('%sv,' % fv)
+        factorfile.write('%sv\n' % factors[cell][-1])
+
+
+def make_data_frame(matrix, fields, measure='perc_corr'):
+    '''
+    Returns a dictionary that can be passed into R for data analysis.
+
+    Data Frames will loke like this:
+    Subject Field[1] Field[2] ... Field[n]
+    1       x        y        ... z
+    1 ...
+    2       a        b        ... d
+    ...
+
+    Input:
+        matrix: ndarray
+            Each dimension is treated as one factor and dummy
+            coded (i.e. 0:n)
+        fields: iterable
+            String names for each factor
+        measure: string
+            String Name for the dependent variable
+    Output:
+        Dictionary
+
+    '''
+    slice_list = [slice(d) for d in matrix.shape]
+    indices = np.mgrid[slice_list]
+
+    data_frame = {measure: robjects.FloatVector(matrix.flatten().tolist())}
+    for index, name in zip(indices, fields):
+        data_frame[name] = robjects.IntVector((1 + index).flatten().tolist())
+
+    return data_frame
+
+def test_oneway_aov():
+    robj = robjects
+    dfilename = 'data/R.appendix3.data'
+    #robj.r("df <- read.csv('%s', header=T)" % dfile)
+    dat = genfromtxt(dfilename, names=True, dtype=None)
+    sids = np.unique(dat['Subject'])
+    dms = {}
+    datfields = dat.dtype.names
+    for sid in sids:
+        sdat = dat[dat['Subject']==sid]
+        vect = {}
+        for f in datfields:
+            vect[f] = sdat[f]
+        newdm = VectorFactory(vect)
+        dms[sid] = newdm
+
+    factdict = {
+            'Valence':['Neg','Neu','Pos']
+            }
+    aov_res = lm_anova(dms, factdict)
+
+    return aov_res,dms
+
+
+if __name__ == "__main__":
+
+    import doctest
+    doctest.testmod()
+
+    (aov_res, dms) = test_oneway_aov()
+    print aov_res
