@@ -3,6 +3,7 @@ import tempfile
 import copy
 import csv
 import numpy as np
+import ipdb #@UnusedImport
 from rpy2 import robjects
 from rpy2.robjects.vectors import DataFrame
 from ocupy import measures as ms
@@ -69,7 +70,7 @@ def aov(matrix, factor_names, measure_name, robj, interactions='+'):
     robj.r('detach(df)')
 
 
-def lm_anova(fms, factor_dict, interactions='+'):
+def lm_anova(fms, factor_dict, dv_func, interactions='+'):
     '''
     Calculates a repeated measure anova using R and the Anova function.
 
@@ -82,6 +83,8 @@ def lm_anova(fms, factor_dict, interactions='+'):
             Contains a datamat per subject.
         factor_dict : dictionary
             Contains factors as keys, and factor levels as values.
+        dv_func: function
+            the function to call on the cell to determine the dependent variable. e.g. dv_func = lambda v: mean(v.arousal)
         interactions : string
             '+' for no interactions
             '*' for all interactions
@@ -95,8 +98,7 @@ def lm_anova(fms, factor_dict, interactions='+'):
             cell_names = set(cells.keys())
         else:
             assert len(cell_names - set(cells.keys())) == 0
-        f = lambda v: ms.percent_correct(ms.get_contingency_table(v))
-        pc = dv_from_cells(cells, f)
+        pc = dv_from_cells(cells, dv_func)
         cell_fms.append(pc)
     cell_names = list(cell_names)
     datafile = tempfile.NamedTemporaryFile('w', delete=False)
@@ -130,7 +132,7 @@ def _lm_anova(dfile, facfile, factors, robj, interactions='+'):
             corresponds to moving along the rows in facfile.
         factors : list
             List of factor names.
-        intteractions : string
+        interactions : string
             '+' if no interactions should be estimated,
             '*' if interactions should be estimated.
     '''
@@ -188,7 +190,7 @@ def filter_by_dict(fm, d):
                 del m[key]
                 v2 = copy.copy(factor_list)
                 v2.append(v)
-                drill_down(fm[fm.field(key) == v], m, name + '%s%i' % (key, v),
+                drill_down(fm[fm.field(key) == v], m, name + '%s%s' % (key, str(v)),
                         v2)
 
     drill_down(fm, d, '', [])
@@ -328,7 +330,7 @@ def filter_by_dict(fm, d):
                 del m[key]
                 v2 = copy.copy(factor_list)
                 v2.append(v)
-                drill_down(fm[fm.field(key) == v], m, name + '%s%i' % (key, v),
+                drill_down(fm[fm.field(key) == v], m, name + '%s%s' % (key, str(v)),
                         v2)
 
     drill_down(fm, d, '', [])
@@ -431,10 +433,12 @@ def make_data_frame(matrix, fields, measure='perc_corr'):
     return data_frame
 
 def test_oneway_aov():
-    robj = robjects
+    """
+    Test of one-way within-subjects anova,
+    from http://personality-project.org/r/r.anova.html.
+    """
     dfilename = 'data/R.appendix3.data'
-    #robj.r("df <- read.csv('%s', header=T)" % dfile)
-    dat = genfromtxt(dfilename, names=True, dtype=None)
+    dat = np.genfromtxt(dfilename, names=True, dtype=None)
     sids = np.unique(dat['Subject'])
     dms = {}
     datfields = dat.dtype.names
@@ -449,7 +453,9 @@ def test_oneway_aov():
     factdict = {
             'Valence':['Neg','Neu','Pos']
             }
-    aov_res = lm_anova(dms, factdict)
+
+    f = lambda v: mean(v.Recall)
+    aov_res = lm_anova(dms, factdict, f)
 
     return aov_res,dms
 
